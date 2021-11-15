@@ -164,10 +164,7 @@ PROC updateGameStatus
 	call moveRectangle, [rectLst]
 	mov ecx, 1
 	call moveRectangle, [rectLst + 4*ecx]
-	;call moveRectangle, offset balk
-	call checkIfHit, [rectLst]
-	call checkIfHit, [rectLst + 4*ecx]
-	;call checkIfHit, offset balk
+	call checkAllIfHit
 	call checkCollision, [rectLst], [rectLst + 4*ecx]
 
 	ret
@@ -206,6 +203,19 @@ hitBottomBorder:
 noBorder:
 	ret
 ENDP checkIfHit
+
+PROC checkAllIfHit
+	USES	edx, ecx
+
+	mov ecx, 0
+keepChecking:
+	call checkIfHit, [rectLst + 4*ecx]
+	inc ecx
+	cmp ecx, 2
+	jne keepChecking
+doneChecking:
+	ret
+ENDP checkAllIfHit
 
 ;collision detection
 
