@@ -45,8 +45,8 @@ initAABB:
 	mov ecx, [@@ymin]
 	mov edx, [@@xmax]
 	mov edi, [@@ymax]
-	mov [(rect eax).boundingBox.min.x], ecx
-	mov [(rect eax).boundingBox.min.y], ebx
+	mov [(rect eax).boundingBox.min.x], ebx
+	mov [(rect eax).boundingBox.min.y], ecx
 	mov [(rect eax).boundingBox.max.x], edx
 	mov [(rect eax).boundingBox.max.y], edi
 initVelocity:
@@ -84,9 +84,18 @@ PROC startGameStatus
 
 	square rect <>
 	balk rect <>
-	call initRectangle, offset square, 10, 10, 20, 20, 1, 0, 10
-	;call initRectangle, offset balk, 30, 10, 40, 20, 0, 0, 10
-	call drawRectangle, offset square, WHITE
+	;lea edx, [rectLst]
+	;mov eax, edx
+	mov [rectLst], offset square
+	mov ecx, 1
+	;mov eax, edx + 4*ecx
+	mov [rectLst + 4*ecx], offset balk
+
+	;mov edx + ecx*4, offset balk
+	;mov [rectLst], offset balk
+	call initRectangle, [rectLst], 0, 10, 10, 20, 2, 1, 10
+	call initRectangle, [rectLst + 4*ecx], SCRWIDTH - 10, 10, SCRWIDTH, 20, -1, 2, 10
+	;call drawRectangle, offset square, WHITE
 	;call drawRectangle, offset balk, WHITE
 
 	ret
@@ -151,11 +160,15 @@ ENDP handleInput
 ;update loop
 
 PROC updateGameStatus
-	
-	call moveRectangle, offset square
+
+	call moveRectangle, [rectLst]
+	mov ecx, 1
+	call moveRectangle, [rectLst + 4*ecx]
 	;call moveRectangle, offset balk
-	;call checkIfHit, offset square, offset balk
+	call checkIfHit, [rectLst]
+	call checkIfHit, [rectLst + 4*ecx]
 	;call checkIfHit, offset balk
+	call checkCollision, [rectLst], [rectLst + 4*ecx]
 
 	ret
 ENDP updateGameStatus
@@ -163,11 +176,10 @@ ENDP updateGameStatus
 ;check if rect hit border
 
 PROC checkIfHit
-	ARG 	@@rect1Ptr:dword, @@rect2Ptr:dword
+	ARG 	@@rect1Ptr:dword
 	USES 	eax, ebx, ecx
 
 	mov ebx, [@@rect1Ptr]
-	mov ecx, [@@rect2Ptr]
 	;check if hit borders
 checkHorizontal:
 	cmp [(rect ebx).boundingBox.min.x], 0
@@ -192,13 +204,6 @@ hitBottomBorder:
 	imul eax, -1
 	mov [(rect ebx).velocity.y], eax
 noBorder:
-	;check if hit other rects
-	call checkCollision, ebx, ecx
-	cmp eax, 1
-	jnz noCollision
-	mov [(rect ebx).velocity.x], 0
-	mov [(rect ebx).velocity.y], 0
-noCollision:
 	ret
 ENDP checkIfHit
 
@@ -206,29 +211,31 @@ ENDP checkIfHit
 
 PROC checkCollision
 	ARG 	@@rect1Ptr:dword, @@rect2Ptr:dword
-	USES ebx, ecx, edx ;res in eax
+	USES eax, ebx, ecx
 
-	mov ebx, [@@rect1Ptr]
-	mov ecx, [@@rect2Ptr]
+	mov eax, [@@rect1Ptr]
+	mov ebx, [@@rect2Ptr]
 
-	mov edx, [(rect ecx).boundingBox.min.x]
-	cmp [(rect ebx).boundingBox.max.x], edx
-	jl noIntersection
-	mov edx, [(rect ecx).boundingBox.max.x]
-	cmp [(rect ebx).boundingBox.min.x], edx
-	jg noIntersection
-	mov edx, [(rect ecx).boundingBox.min.y]
-	cmp [(rect ebx).boundingBox.max.y], edx
-	jl noIntersection
-	mov edx, [(rect ecx).boundingBox.max.y]
-	cmp [(rect ebx).boundingBox.min.y], edx
-	jg noIntersection
+	mov ecx, [(rect ebx).boundingBox.min.x]
+	cmp [(rect eax).boundingBox.max.x], ecx
+	jle noIntersection
+	mov ecx, [(rect ebx).boundingBox.max.x]
+	cmp [(rect eax).boundingBox.min.x], ecx
+	jge noIntersection
+	mov ecx, [(rect ebx).boundingBox.min.y]
+	cmp [(rect eax).boundingBox.max.y], ecx
+	jle noIntersection
+	mov ecx, [(rect ebx).boundingBox.max.y]
+	cmp [(rect eax).boundingBox.min.y], ecx
+	jge noIntersection
 	jmp intersection
 noIntersection:
-	mov eax, 0
 	ret
 intersection:
-	mov eax, 1
+	mov [(rect eax).velocity.x], 0
+	mov [(rect eax).velocity.y], 0
+	mov [(rect ebx).velocity.x], 0
+	mov [(rect ebx).velocity.y], 0
 	ret
 ENDP checkCollision
 
@@ -376,6 +383,7 @@ ENDP main
 DATASEG
 
 	screenBuffer 	db 64000 dup(0), '$'
+	rectLst 		dd 64 dup(?), '$'
 
 STACK 100h
 
