@@ -33,6 +33,13 @@ STRUC rect
 	mass dd ?
 ENDS rect
 
+STRUC manifold
+	rect1 rect <>
+	rect2 rect <>
+	penetration dd ?
+	normal vec <>
+ENDS manifold
+
 ;set begin values for AABB struct
 
 PROC initRectangle
@@ -157,7 +164,6 @@ ENDP handleInput
 ;update loop
 
 PROC updateGameStatus
-	USES 	ecx
 
 	call moveAllRects
 	call checkAllIfHit
@@ -288,6 +294,15 @@ checkLoop:
 stopCheckingLoop:
 	ret
 ENDP checkAllCollisions
+
+PROC impulseResolution
+	ARG 	@@rect1Ptr:dword, @@rect2Ptr:dword
+	USES 	eax, ebx, ecx, edx
+
+
+
+	ret
+ENDP impulseResolution
 
 ;wait until user enters a key
 
