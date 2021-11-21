@@ -159,11 +159,7 @@ ENDP handleInput
 PROC updateGameStatus
 	USES 	ecx
 
-	call moveRectangle, [rectLst]
-	mov ecx, 1
-	call moveRectangle, [rectLst + 4*ecx]
-	inc ecx 
-	call moveRectangle, [rectLst + 4*ecx]
+	call moveAllRects
 	call checkAllIfHit
 	call checkAllCollisions
 
@@ -404,6 +400,19 @@ PROC moveRectangle
 	call drawRectangle, eax, WHITE
 	ret
 ENDP moveRectangle
+
+PROC moveAllRects
+	USES	eax, ecx
+
+	mov ecx, [rectNum]
+	mov eax, 0
+keepMoving:
+	call moveRectangle, [rectLst + 4*eax]
+	inc eax
+	loop keepMoving
+doneMoving:
+	ret
+ENDP moveAllRects
 
 ;--------------------------------------------------------
 ;MAIN
