@@ -6,7 +6,7 @@ ASSUME cs:_TEXT,ds:FLAT,es:FLAT,fs:FLAT,gs:FLAT
 VM EQU 13h				;video mode
 WHITE EQU 0Fh 			;white (row: 0, col: F) using default colour palette
 VMEMADR EQU 0A0000h		;video memory address
-SCRWIDTH EQU 320		;screen witdth
+SCRWIDTH EQU 320		;screen width
 SCRHEIGHT EQU 200		;screen height
 BACKGROUNDCOL EQU 00h	;background color (row: 0, col: 0)
 
