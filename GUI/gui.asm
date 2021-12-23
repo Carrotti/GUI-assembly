@@ -236,7 +236,7 @@ ENDP moveAllRects
 
 PROC circHitBorder
 	ARG 	@@circPtr:dword
-	USES	eax, ebx, ecx, edx
+	USES	eax, ebx
 
 	mov eax, [@@circPtr]
 leftBorder:
@@ -259,11 +259,36 @@ bottomBorder:
 	add ebx, [(circle eax).radius]
 	cmp ebx, SCRHEIGHT
 	jg bottomBorderHit
+	jmp exit
 leftBorderHit:
-	
+	mov ebx, [(circle eax).velocity.x]
+	cmp ebx, 0
+	jg topBorder
+	imul ebx, -1
+	mov [(circle eax).velocity.x], ebx
+	jmp topBorder
 rightBorderHit:
+	mov ebx, [(circle eax).velocity.x]
+	cmp ebx, 0
+	jl topBorder
+	imul ebx, -1
+	mov [(circle eax).velocity.x], ebx
+	jmp topBorder
 topBorderHit:
+	mov ebx, [(circle eax).velocity.y]
+	cmp ebx, 0
+	jg exit
+	imul ebx, -1
+	mov [(circle eax).velocity.y], ebx
+	jmp exit
 bottomBorderHit:
+	mov ebx, [(circle eax).velocity.y]
+	cmp ebx, 0
+	jl exit
+	imul ebx, -1
+	mov [(circle eax).velocity.y], ebx
+exit:
+	ret
 ENDP circHitBorder
 ;check if a rectangle hit a border
 ;if so, bounce off
@@ -853,7 +878,8 @@ PROC updateGameStatus
 	call allHitBorder
 	call applyAllGravity
 	inc [timeStamp]
-	;call checkAllCollisions
+	call circHitBorder, offset circ
+	call checkAllCollisions
 
 	ret
 ENDP updateGameStatus
