@@ -3,7 +3,6 @@ P386
 MODEL FLAT, C
 ASSUME cs:_TEXT,ds:FLAT,es:FLAT,fs:FLAT,gs:FLAT
 
-VM EQU 13h				;video mode
 WHITE EQU 0Fh 			;white (row: 0, col: F) using default colour palette
 VMEMADR EQU 0A0000h		;video memory address
 SCRWIDTH EQU 320		;screen witdth
@@ -31,8 +30,16 @@ STRUC AABB
 	max vec <>
 ENDS AABB
 
-;rectangle
 
+STRUC circle
+	radius dd ?
+	position vec <>
+	velocity vec <>
+	mass dd ?
+	restitution dd ?
+ENDS circle
+
+;rectangle
 STRUC rect
 	box AABB <>
 	velocity vec <>
@@ -47,6 +54,8 @@ ENDS rect
 STRUC manifold
 	rect1 rect <>
 	rect2 rect <>
+	circ1 circle <>
+	circ2 circle <>
 	penetration dd ?
 	normal vec <>
 ENDS manifold
@@ -54,6 +63,29 @@ ENDS manifold
 ;--------------------------------------------------------
 ;SETUP PROCEDURES
 ;--------------------------------------------------------
+PROC initCircle
+	ARG 	@@circPtr:dword, @@x:dword, @@y:dword, @@radius:dword, @@velx:dword, @@vely:dword, @@mass:dword, @@restitution:dword
+	USES	eax, ebx
+
+	mov eax, [@@circPtr]
+	mov ebx, [@@x]
+	mov [(circle eax).position.x], ebx
+	mov ebx, [@@y]
+	mov [(circle eax).position.y], ebx
+	mov ebx, [@@radius]
+	mov [(circle eax).radius], ebx
+	mov ebx, [@@velx]
+	mov [(circle eax).velocity.x], ebx
+	mov ebx, [@@vely]
+	mov [(circle eax).velocity.y], ebx
+	mov ebx, [@@mass]
+	mov [(circle eax).mass], ebx
+	mov ebx, [@@restitution]
+	mov [(circle eax).restitution], ebx
+	ret
+ENDP initCircle
+
+
 
 ;set begin values for AABB struct in a rectangle
 
@@ -88,6 +120,68 @@ initRestitution:
 
 	ret
 ENDP initRectangle
+
+;--------------------------------------------------------
+;HELP PROCEDURES
+;--------------------------------------------------------
+
+;calculate square root and store in eax
+;using binary search algorithm
+PROC sqrt
+	ARG 	@@y:dword
+	USES	ebx, ecx, edx, edi
+
+	mov ebx, 0 
+	mov ecx, [@@y] 
+	inc ecx     
+binarySearch:
+	dec ecx     
+	cmp ebx, ecx
+	je exitLoop 
+	inc ecx		
+	mov eax, ebx
+	add eax, ecx
+	mov edx, 0  
+	mov edi, 2  
+	div edi	
+	mov edi, eax
+	mov eax, [@@y]
+	mov edx, 0
+	div edi
+	cmp edi, eax
+	mov eax, edi
+	jle lessOrEqual
+	mov ecx, eax
+	jmp binarySearch
+lessOrEqual:
+	mov ebx, eax
+	jmp binarySearch
+exitLoop:
+	mov eax, ebx
+	ret
+ENDP sqrt
+
+;calculates distance between two points and stores it in eax
+PROC distance
+	ARG		@@vec1Ptr:dword, @@vec2Ptr:dword
+	USES	ebx, ecx, edx
+
+	mov ebx, [@@vec1Ptr]
+	mov ecx, [@@vec2Ptr]
+	mov edx, [(vec ebx).x]
+	mov eax, [(vec ecx).x]
+	sub eax, edx
+	mul eax
+	push eax
+	mov edx, [(vec ebx).y]
+	mov eax, [(vec ecx).y]
+	sub eax, edx
+	mul eax
+	pop edx
+	add eax, edx
+	call sqrt, eax
+	ret
+ENDP distance
 
 ;--------------------------------------------------------
 ;PHYSICS
@@ -250,116 +344,61 @@ ENDP checkAllCollisions
 
 ;impulse resolution
 
-PROC impulseResolution
-	ARG 	@@rect1Ptr:dword, @@rect2Ptr:dword
-	USES 	eax, ebx, ecx, edx
 
-	mov eax, [@@rect1Ptr]
-	mov ebx, [@@rect2Ptr]
 
-	mf manifold <>
-	rv vec <>
+;calculate manifold for 2 circles
 
-	mov [mf.rect1], [@@rect1Ptr]
-	mov [mf.rect2], [@@rect2Ptr]
-	call AABBvsAABB, mf
+PROC CirclevsCircle
+	ARG 	@@manifoldPtr:dword
+	USES	eax, ebx, ecx, edx
 
-	mov ecx, [(rect eax).velocity.x]
-	mov edx, [(rect ebx).velocity.x]
-	sub edx, ecx
-	mov [rv.x], edx
-	mov ecx, [(rect eax).velocity.y]
-	mov edx, [(rect ebx).velocity.y]
-	sub edx, ecx
-	mov [rv.y], edx
-	push ebx
+	AtoB vec <>
+	mov ecx, [@@manifoldPtr]
+	mov ebx, [(manifold ecx).circ1.position.x]
+	mov eax, [(manifold ecx).circ2.position.x]
+	sub eax, ebx ;eax = delta x
+	mov [AtoB.x], eax
+	mov ebx, [(manifold ecx).circ1.position.y]
+	mov eax, [(manifold ecx).circ2.position.y]
+	sub eax, ebx ;eax = delta y
+	mov [AtoB.y], eax
+	mul eax
 	push eax
-
-	mov eax, [mf.normal.x]
-	mov ebx, [rv.x]
-	mul ebx
-	mov ecx, eax
-	mov eax, [mf.normal.y]
-	mov ebx, [rv.y]
-	mul ebx
-	add eax, ecx ;eax = velAlongNormal
-
+	mov eax, [AtoB.x]
+	mul eax		;eax = square(delta x)
+	pop ebx		;ebx = square(delta y)
+	add ebx, eax;ebx = square(distance(circ1, circ2))
+	mov eax, [(manifold ecx).circ1.radius]
+	add eax, [(manifold ecx).circ2.radius]
+	mov edx, eax;edx = rad1 + rad2
+	mul eax 	;eax = square(rad1 + rad2)
+	cmp eax, ebx 
+	jl notTouching 	;return if circles not touching
+	call sqrt, ebx ;eax = distance(circ1, circ2)
 	cmp eax, 0
-	jg @@return
-	push eax
-
-@@calculateRestitution:
-	mov eax, [mf.rect1.restitution]
-	mov ebx, [mf.rect2.restitution]
-	cmp eax, ebx
-	jg @@useRect1Restitution
-@@useRect2Restitution:
-	mov eax, ebx
-@@useRect1Restitution:
-	pop ebx ;velAlongNormal
-	add eax, 1
-	mul ebx
-	mov ebx, 0
-	sub ebx, eax
-	mov eax, ebx ;impulse calar in eax
-	push eax
-	mov eax, 1
-	mov ebx, [mf.rect1.mass]
-	xor edx, edx
-	div ebx
-	push eax ;1/A.mass
-	mov eax, 1
-	mov ebx, [mf.rect2.mass]
-	xor edx, edx
-	div ebx
-	pop ebx
-	add ebx, eax
-	pop eax ;impulse scalar
-	div ebx
-@@applyImpulse:
-	impulse vec <>
-	mov ebx, eax
-	mul [mf.normal.x]
-	mov [impulse.x], eax
-	mov eax, ebx
-	mul [mf.normal.y]
-	mov [impulse.y], eax
-	mov eax, [@@rect1Ptr]
-	mov ebx, [@@rect2Ptr]
-
-	mov eax, [impulse.x]
-	mov edx, [mf.rect1.mass]
-	mul edx
-	mov [impulse.x], eax
-	mov eax, [impulse.y]
-	mul edx
-	mov [impulse.y], eax
-	mov eax, 1
-	mov ebx, [impulse.x]
-	xor edx, edx
-	div ebx
-	mov [impulse.x], eax
-	mov ebx, [impulse.y]
-	xor edx, edx
-	div edx
-	mov [impulse.y], eax
-	mov eax, [impulse.x]
-	mov ebx, [@@rect1Ptr]
-	mov ecx, [(rect ebx).velocity.x]
-	sub ecx, eax
-	mov [(rect ebx).velocity.x], ecx
-	mov eax, [impulse.y]
-	mov ebx, [@@rect2Ptr]
-	mov ecx, [(rect ebx).velocity.y]
-	add ecx, eax
-	mov [(rect ebx).velocity.y], ecx
-
-@@return:
+	jne notSamePosition
+samePosition:
+	mov eax, [(manifold ecx).circ1.radius]
+	mov [(manifold ecx).penetration], eax;penetration is radius of either circle
+	mov [(manifold ecx).normal.x], 0
+	mov [(manifold ecx).normal.y], 1 ;choose any unit vector as normal
 	ret
-ENDP impulseResolution
+notSamePosition:
+	sub edx, eax
+	mov [(manifold ecx).penetration], edx;penetration = rad1+rad2-distance
+	mov ebx, eax
+	mov eax, [AtoB.x]
+	div ebx
+	mov [(manifold ecx).normal.x], eax
+	mov eax, [AtoB.y]
+	div ebx
+	mov [(manifold ecx).normal.y], eax;normal is a unit vector in the direction of AtoB
+	ret
+notTouching:
+	ret
+ENDP CirclevsCircle
 
-;calculate manifold
-
+;calculate manifold for 2 rectangles
 PROC AABBvsAABB
 	ARG		@@manifoldPtr:dword
 	USES 	eax, ebx, ecx, edx
@@ -431,7 +470,7 @@ PROC AABBvsAABB
 @@alreadyPositive1:
 	sub eax, ebx ;y overlap
 	cmp eax, 0
-	jle @@return
+	jle short @@return
 
 	pop ebx ;x overlap
 	cmp eax, ebx
@@ -489,8 +528,40 @@ PROC setPixel
 	ret
 ENDP setPixel
 
-;draw AABB struc, given a color
+;draw circle struct using mid-point circle algorithm 
+PROC drawCircle
+	ARG		@@circPtr:dword, @@col:byte
+	USES 	eax, ebx, ecx, edx, esi, edi
 
+	mov eax, [@@circPtr]
+	mov ebx, [(circle ecx).radius]	   ;r
+	mov ecx, [(circle ecx).position.x] ;x_center
+	mov edx, [(circle ecx).position.y] ;y_center
+	mov al, [@@col]
+	add ecx, ebx;x_center + r
+	call setPixel, ecx, edx, eax
+	cmp ebx, 0
+	jle radiusZero;if radius = 0 only one pixel is drawn
+	sub ecx, ebx;x_center
+	add edx, ebx;y_center + r
+	call setPixel, ecx, edx, eax
+	sub ecx, ebx;x_center - r 
+	sub edx, ebx;y_center
+	call setPixel, ecx, edx, eax
+	add ecx, ebx;x_center
+	sub edx, ebx;y_center - r
+	call setPixel, ecx, edx, eax
+	add edx, ebx;y_center
+	mov esi, ebx;x = r
+	mov edi, 0	;y = 0
+	mov eax, 1
+	sub eax, ebx;p = 1 - r
+radiusZero:
+	ret
+
+ENDP drawCircle
+
+;draw AABB struc, given a color
 PROC drawRectangle
 	ARG 	@@rectPtr:dword, @@col:byte
 	USES 	eax, ebx, ecx, edx, edi ; note: MUL uses edx!
@@ -557,15 +628,17 @@ PROC startGameStatus
 	balk rect <>
 	paal rect <>
 	squareBalkMan manifold <>
-	mov [rectLst], offset square
-	call initRectangle, offset square, 0, 10, 10, 20, 2, 1, 10, 1
-	mov ecx, 1
-	mov [rectLst + 4*ecx], offset balk
-	call initRectangle, offset balk, SCRWIDTH - 20, 10, SCRWIDTH, 15, -1, 2, 10, 2
-	inc ecx
-	mov [rectLst + 4*ecx], offset paal
-	call initRectangle, offset paal, SCRWIDTH/2, SCRHEIGHT/2, SCRWIDTH/2 + 5, SCRHEIGHT/2 + 20, 1, 2, 3
-
+	;mov [rectLst], offset square
+	;call initRectangle, offset square, 0, 10, 10, 20, 2, 1, 10, 1
+	;mov ecx, 1
+	;mov [rectLst + 4*ecx], offset balk
+	;call initRectangle, offset balk, SCRWIDTH - 20, 10, SCRWIDTH, 15, -1, 2, 10, 2
+	;inc ecx
+	;mov [rectLst + 4*ecx], offset paal
+	;call initRectangle, offset paal, SCRWIDTH/2, SCRHEIGHT/2, SCRWIDTH/2 + 5, SCRHEIGHT/2 + 20, 1, 2, 3
+	circ circle <>
+	call initCircle, offset circ, 100, 100, 50, 0,0,0,0 
+	call drawCircle, offset circ, WHITE
 	ret
 ENDP startGameStatus
 
@@ -674,7 +747,7 @@ PROC main
     push ds
     pop es
 
-    call setVideoMode, VM
+    call setVideoMode, 13h
 	call startGameStatus
 
 gameLoop:
