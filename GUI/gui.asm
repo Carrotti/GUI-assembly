@@ -5,7 +5,7 @@ ASSUME cs:_TEXT,ds:FLAT,es:FLAT,fs:FLAT,gs:FLAT
 
 WHITE EQU 0Fh 			;white (row: 0, col: F) using default colour palette
 VMEMADR EQU 0A0000h		;video memory address
-SCRWIDTH EQU 320		;screen width
+SCRWIDTH EQU 320		;screen witdth
 SCRHEIGHT EQU 200		;screen height
 BACKGROUNDCOL EQU 00h	;background color (row: 0, col: 0)
 
@@ -187,35 +187,21 @@ ENDP distance
 ;PHYSICS
 ;--------------------------------------------------------
 
-PROC moveCircle
-	ARG 	@@circPtr:dword
-	USES	eax, ebx
-
-	mov eax, [@@circPtr]
-	call drawCircle, eax, BACKGROUNDCOL
-	mov ebx, [(circle eax).velocity.x]
-	add [(circle eax).position.x], ebx
-	mov ebx, [(circle eax).velocity.y]
-	add [(circle eax).position.y], ebx
-	call drawCircle, [@@circPtr], WHITE
-	ret
-
-ENDP moveCircle
 ;move a rectangle (draw same rectangle in black, move and draw again)
 
 PROC moveRectangle
 	ARG		@@rectPtr:dword
-	USES 	eax, ebx
+	USES 	eax, ebx, ecx, edx, edi
 
-	mov eax, [@@rectPtr]
-	call drawRectangle, eax, BACKGROUNDCOL
-	mov ebx, [(rect eax).velocity.x]
-	add [(rect eax).box.min.x], ebx
-	add [(rect eax).box.max.x], ebx
-	mov ebx, [(rect eax).velocity.y]
-	add [(rect eax).box.min.y], ebx
-	add [(rect eax).box.max.y], ebx
-	call drawRectangle, eax, WHITE
+	mov ebx, [@@rectPtr]
+	call drawRectangle, ebx, BACKGROUNDCOL
+	mov ecx, [(rect ebx).velocity.x]
+	mov edx, [(rect ebx).velocity.y]
+	add [(rect ebx).box.min.x], ecx
+	add [(rect ebx).box.min.y], edx
+	add [(rect ebx).box.max.x], ecx
+	add [(rect ebx).box.max.y], edx
+	call drawRectangle, ebx, WHITE
 	ret
 ENDP moveRectangle
 
@@ -234,41 +220,10 @@ doneMoving:
 	ret
 ENDP moveAllRects
 
-PROC circHitBorder
-	ARG 	@@circPtr:dword
-	USES	eax, ebx, ecx, edx
-
-	mov eax, [@@circPtr]
-leftBorder:
-	mov ebx, [(circle eax).position.x]
-	sub ebx, [(circle eax).radius]
-	cmp ebx, 0
-	jl leftBorderHit
-rightBorder:
-	mov ebx, [(circle eax).position.x]
-	add ebx, [(circle eax).radius]
-	cmp ebx, SCRWIDTH
-	jg rightBorderHit
-topBorder:
-	mov ebx, [(circle eax).position.y]
-	sub ebx, [(circle eax).radius]
-	cmp ebx, 0
-	jl topBorderHit
-bottomBorder:
-	mov ebx, [(circle eax).position.y]
-	add ebx, [(circle eax).radius]
-	cmp ebx, SCRHEIGHT
-	jg bottomBorderHit
-leftBorderHit:
-	
-rightBorderHit:
-topBorderHit:
-bottomBorderHit:
-ENDP circHitBorder
 ;check if a rectangle hit a border
 ;if so, bounce off
 
-PROC rectHitBorder
+PROC checkIfHit
 	ARG 	@@rect1Ptr:dword
 	USES 	eax, ebx, ecx, edx
 
@@ -288,6 +243,13 @@ hitLeftBorder:
 hitRightBorder:
 	mov eax, [(rect edx).velocity.x]
 	imul eax, -1
+	cmp eax, 0
+	jl @@neg1
+	sub eax, 1 ;if positive velocity, subtract 1
+	jmp @@pos1
+@@neg1:
+	add eax, 1 ;if negative velocity, add 1
+@@pos1:
 	mov [(rect edx).velocity.x], eax
 checkVertical:
 	mov eax, [(rect edx).box.min.y]
@@ -303,26 +265,32 @@ hitTopBorder:
 hitBottomBorder:
 	mov eax, [(rect edx).velocity.y]
 	imul eax, -1
+	cmp eax, 0
+	jl @@neg2
+	sub eax, 1
+	jmp @@pos2
+@@neg2:
+	add eax, 1
+@@pos2:
 	mov [(rect edx).velocity.y], eax
 noBorder:
 	ret
-ENDP rectHitBorder
+ENDP checkIfHit
 
-;map rectHitBorder on rectLst
-;map circHitBorder on circLst TODO 
+;map checkIfHit on rectLst
 
-PROC allHitBorder
+PROC checkAllIfHit
 	USES	eax, ecx
 
 	mov ecx, [rectNum]
 	mov eax, 0
 keepChecking:
-	call rectHitBorder, [rectLst + 4*eax]
+	call checkIfHit, [rectLst + 4*eax]
 	inc eax
 	loop keepChecking
 doneChecking:
 	ret
-ENDP allHitBorder
+ENDP checkAllIfHit
 
 ;collision detection
 ;using the separating axis theorem:
@@ -398,18 +366,19 @@ PROC CirclevsCircle
 	ARG 	@@manifoldPtr:dword
 	USES	eax, ebx, ecx, edx
 
+	AtoB vec <>
 	mov ecx, [@@manifoldPtr]
 	mov ebx, [(manifold ecx).circ1.position.x]
 	mov eax, [(manifold ecx).circ2.position.x]
 	sub eax, ebx ;eax = delta x
-	mov [vecAB.x], eax
+	mov [AtoB.x], eax
 	mov ebx, [(manifold ecx).circ1.position.y]
 	mov eax, [(manifold ecx).circ2.position.y]
 	sub eax, ebx ;eax = delta y
-	mov [vecAB.y], eax
+	mov [AtoB.y], eax
 	mul eax
 	push eax
-	mov eax, [vecAB.x]
+	mov eax, [AtoB.x]
 	mul eax		;eax = square(delta x)
 	pop ebx		;ebx = square(delta y)
 	add ebx, eax;ebx = square(distance(circ1, circ2))
@@ -432,12 +401,12 @@ notSamePosition:
 	sub edx, eax
 	mov [(manifold ecx).penetration], edx;penetration = rad1+rad2-distance
 	mov ebx, eax
-	mov eax, [vecAB.x]
+	mov eax, [AtoB.x]
 	div ebx
 	mov [(manifold ecx).normal.x], eax
-	mov eax, [vecAB.y]
+	mov eax, [AtoB.y]
 	div ebx
-	mov [(manifold ecx).normal.y], eax;normal is a unit vector in the direction of vecAB
+	mov [(manifold ecx).normal.y], eax;normal is a unit vector in the direction of AtoB
 	ret
 notTouching:
 	ret
@@ -457,6 +426,7 @@ PROC AABBvsAABB
 	mov ebx, [(manifold ecx).rect2.box.min.y]
 	sub ebx, eax
 	pop eax
+	vecAB vec <> ;vector from A to B
 	mov [vecAB.x], eax
 	mov [vecAB.y], ebx
 
@@ -550,6 +520,37 @@ PROC AABBvsAABB
 	ret
 ENDP AABBvsAABB
 
+PROC applyGravity
+	ARG @@rectPtr:dword
+	USES eax, ebx, ecx, edx
+
+	mov eax, [timeStamp]
+	mov ebx, 10 
+	xor edx, edx
+	div ebx
+	cmp edx, 0
+	jne @@noSecondElapsed
+	mov ebx, [@@rectPtr]
+	mov ecx, [(rect ebx).velocity.y]
+	add ecx, 2
+	mov [(rect ebx).velocity.y], ecx
+@@noSecondElapsed:
+	ret
+ENDP applyGravity
+
+PROC applyAllGravity
+	USES eax, ebx, ecx
+
+	mov ecx, [rectNum]
+	mov eax, 0
+@@keepChecking:
+	call applyGravity, [rectLst + 4*eax]
+	inc eax
+	loop @@keepChecking
+@@doneChecking:
+	ret
+ENDP applyAllGravity
+
 ;--------------------------------------------------------
 ;DRAWING PROCEDURES
 ;--------------------------------------------------------
@@ -560,13 +561,7 @@ PROC setPixel
 	ARG 	@@x:dword, @@y:dword, @@col:byte
 	USES 	edi, eax, ecx, edx
 
-	;check if the pixel is in the bounds first
-	mov eax, [@@x]
-	cmp eax, SCRWIDTH
-	ja dontSetPixel
 	mov eax, [@@y]
-	cmp eax, SCRHEIGHT
-	ja dontSetPixel
 	mov edx, SCRWIDTH
 	mul edx				;calculate row offset
 	add	eax, [@@x]		;calculate column offset
@@ -574,7 +569,7 @@ PROC setPixel
 	add edi, eax		;calculate coordinate idx
     mov al, [@@col]
     stosb				;store color in screenBuffer at idx edi
-dontSetPixel:
+
 	ret
 ENDP setPixel
 
@@ -584,83 +579,31 @@ PROC drawCircle
 	USES 	eax, ebx, ecx, edx, esi, edi
 
 	mov eax, [@@circPtr]
-	mov ebx, [(circle eax).radius]	   ;r
-	mov ecx, [(circle eax).position.x] ;x_center
-	mov edx, [(circle eax).position.y] ;y_center
+	mov ebx, [(circle ecx).radius]	   ;r
+	mov ecx, [(circle ecx).position.x] ;x_center
+	mov edx, [(circle ecx).position.y] ;y_center
 	mov al, [@@col]
-	add ecx, ebx
-	call setPixel, ecx, edx, eax ;(x_center + r, y_center)
+	add ecx, ebx;x_center + r
+	call setPixel, ecx, edx, eax
 	cmp ebx, 0
-	jle return;if radius = 0 only one pixel is drawn
-	sub ecx, ebx
-	add edx, ebx
-	call setPixel, ecx, edx, eax ;(x_center, y_center + r)
-	sub ecx, ebx
-	sub edx, ebx
-	call setPixel, ecx, edx, eax ;(x_center - r, y_center)
-	add ecx, ebx
-	sub edx, ebx
-	call setPixel, ecx, edx, eax ;(x_center, y_center - r)
-	add edx, ebx
+	jle radiusZero;if radius = 0 only one pixel is drawn
+	sub ecx, ebx;x_center
+	add edx, ebx;y_center + r
+	call setPixel, ecx, edx, eax
+	sub ecx, ebx;x_center - r 
+	sub edx, ebx;y_center
+	call setPixel, ecx, edx, eax
+	add ecx, ebx;x_center
+	sub edx, ebx;y_center - r
+	call setPixel, ecx, edx, eax
+	add edx, ebx;y_center
 	mov esi, ebx;x = r
 	mov edi, 0	;y = 0
-	mov ebx, 1
-	sub ebx, esi;p = 1 - r
-computePosition:
-	cmp esi, edi
-	jle return	;stop if x <= y
-	inc edi 	;y++
-	push edi
-	add edi, edi
-	cmp ebx, 0
-	jle branch1	;if (p>0) => x--; p = p + 2y - 2x + 1 
-	dec esi
-	push esi
-	add esi, esi
-	add ebx, edi
-	sub ebx, esi
-	inc ebx
-	pop esi
-	jmp drawPixels
-branch1:	;else => p = p + 2y + 1
-	add ebx, edi
-	inc ebx 
-drawPixels:
-	pop edi
-	cmp esi, edi
-	jl return;stop if x < y
-	mov al, [@@col]
-	add ecx, esi
-	add edx, edi
-	call setPixel, ecx, edx, eax ;(x_center + x, y_center + y)
-	sub ecx, esi
-	sub ecx, esi
-	call setPixel, ecx, edx, eax ;(x_center - x, y_center + y)
-	sub edx, edi
-	sub edx, edi
-	call setPixel, ecx, edx, eax ;(x_center - x, y_center - y)
-	add ecx, esi
-	add ecx, esi
-	call setPixel, ecx, edx, eax ;(x_center + x, y_center - y)
-	sub ecx, esi
-	add ecx, edi
-	add edx, edi
-	add edx, esi
-	call setPixel, ecx, edx, eax ;(x_center + y, y_center + x)
-	sub ecx, edi
-	sub ecx, edi
-	call setPixel, ecx, edx, eax ;(x_center - y, y_center + x)
-	sub edx, esi
-	sub edx, esi
-	call setPixel, ecx, edx, eax ;(x_center - y, y_center - x)
-	add ecx, edi
-	add ecx, edi
-	call setPixel, ecx, edx, eax ;(x_center + y, y_center - x)
-	add edx, esi
-	sub ecx, edi
-	jmp computePosition
-return:
+	mov eax, 1
+	sub eax, ebx;p = 1 - r
+radiusZero:
 	ret
+
 ENDP drawCircle
 
 ;draw AABB struc, given a color
@@ -738,8 +681,10 @@ PROC startGameStatus
 	inc ecx
 	mov [rectLst + 4*ecx], offset paal
 	call initRectangle, offset paal, SCRWIDTH/2, SCRHEIGHT/2, SCRWIDTH/2 + 5, SCRHEIGHT/2 + 20, 1, 2, 3
-	call initCircle, offset circ, 50, 50, 20, 1,1,0,0 
-	call drawCircle, offset circ, WHITE
+
+	;circ circle <>
+	;call initCircle, offset circ, 100, 100, 50, 0,0,0,0 
+	;call drawCircle, offset circ, WHITE
 	ret
 ENDP startGameStatus
 
@@ -803,10 +748,11 @@ ENDP handleInput
 
 PROC updateGameStatus
 
-	call moveCircle, offset circ
 	call moveAllRects
-	call allHitBorder
-	call checkAllCollisions
+	call checkAllIfHit
+	call applyAllGravity
+	inc [timeStamp]
+	;call checkAllCollisions
 
 	ret
 ENDP updateGameStatus
@@ -867,9 +813,9 @@ ENDP main
 ;--------------------------------------------------------
 
 DATASEG
-	
-	vecAB vec <>
-	circ circle <>
+
+	timeStamp 		dd 0
+
 	screenBuffer 	db 64000 dup(0), '$'
 	rectLst 		dd 64 dup(?), '$'
 	rectNum 		dd 0
