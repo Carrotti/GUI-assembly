@@ -352,19 +352,18 @@ PROC CirclevsCircle
 	ARG 	@@manifoldPtr:dword
 	USES	eax, ebx, ecx, edx
 
-	AtoB vec <>
 	mov ecx, [@@manifoldPtr]
 	mov ebx, [(manifold ecx).circ1.position.x]
 	mov eax, [(manifold ecx).circ2.position.x]
 	sub eax, ebx ;eax = delta x
-	mov [AtoB.x], eax
+	mov [vecAB.x], eax
 	mov ebx, [(manifold ecx).circ1.position.y]
 	mov eax, [(manifold ecx).circ2.position.y]
 	sub eax, ebx ;eax = delta y
-	mov [AtoB.y], eax
+	mov [vecAB.y], eax
 	mul eax
 	push eax
-	mov eax, [AtoB.x]
+	mov eax, [vecAB.x]
 	mul eax		;eax = square(delta x)
 	pop ebx		;ebx = square(delta y)
 	add ebx, eax;ebx = square(distance(circ1, circ2))
@@ -387,12 +386,12 @@ notSamePosition:
 	sub edx, eax
 	mov [(manifold ecx).penetration], edx;penetration = rad1+rad2-distance
 	mov ebx, eax
-	mov eax, [AtoB.x]
+	mov eax, [vecAB.x]
 	div ebx
 	mov [(manifold ecx).normal.x], eax
-	mov eax, [AtoB.y]
+	mov eax, [vecAB.y]
 	div ebx
-	mov [(manifold ecx).normal.y], eax;normal is a unit vector in the direction of AtoB
+	mov [(manifold ecx).normal.y], eax;normal is a unit vector in the direction of vecAB
 	ret
 notTouching:
 	ret
@@ -412,7 +411,6 @@ PROC AABBvsAABB
 	mov ebx, [(manifold ecx).rect2.box.min.y]
 	sub ebx, eax
 	pop eax
-	vecAB vec <> ;vector from A to B
 	mov [vecAB.x], eax
 	mov [vecAB.y], ebx
 
@@ -516,7 +514,12 @@ PROC setPixel
 	ARG 	@@x:dword, @@y:dword, @@col:byte
 	USES 	edi, eax, ecx, edx
 
+	mov eax, [@@x]
+	cmp eax, 0140h
+	ja dontSetPixel
 	mov eax, [@@y]
+	cmp eax, 0C8h
+	ja dontSetPixel
 	mov edx, SCRWIDTH
 	mul edx				;calculate row offset
 	add	eax, [@@x]		;calculate column offset
@@ -524,7 +527,7 @@ PROC setPixel
 	add edi, eax		;calculate coordinate idx
     mov al, [@@col]
     stosb				;store color in screenBuffer at idx edi
-
+dontSetPixel:
 	ret
 ENDP setPixel
 
@@ -534,14 +537,14 @@ PROC drawCircle
 	USES 	eax, ebx, ecx, edx, esi, edi
 
 	mov eax, [@@circPtr]
-	mov ebx, [(circle ecx).radius]	   ;r
-	mov ecx, [(circle ecx).position.x] ;x_center
-	mov edx, [(circle ecx).position.y] ;y_center
+	mov ebx, [(circle eax).radius]	   ;r
+	mov ecx, [(circle eax).position.x] ;x_center
+	mov edx, [(circle eax).position.y] ;y_center
 	mov al, [@@col]
 	add ecx, ebx;x_center + r
 	call setPixel, ecx, edx, eax
 	cmp ebx, 0
-	jle radiusZero;if radius = 0 only one pixel is drawn
+	jle return;if radius = 0 only one pixel is drawn
 	sub ecx, ebx;x_center
 	add edx, ebx;y_center + r
 	call setPixel, ecx, edx, eax
@@ -556,9 +559,63 @@ PROC drawCircle
 	mov edi, 0	;y = 0
 	mov eax, 1
 	sub eax, ebx;p = 1 - r
-radiusZero:
+label1:
+	cmp esi, edi
+	jle return;stop if x <= y
+	inc edi 	;y++
+	push edi;save y
+	add edi, edi ;y*2
+	cmp eax, 0
+	jle branch1;p<=0
+	dec esi; x--
+	push esi;save x
+	add esi, esi ;x*2
+	add eax, edi
+	sub eax, esi
+	inc eax ;p+2y-2x+1
+	pop esi;restore x
+	jmp continue
+branch1:
+	add eax, edi
+	inc eax ;p+2y+1
+continue:
+	pop edi;restore y
+	cmp esi, edi
+	jl return;stop if x < y
+	push eax;save p
+	mov al, [@@col]
+	add ecx, esi;x_center + x
+	add edx, edi;y_center + y
+	call setPixel, ecx, edx, eax
+	sub ecx, esi
+	sub ecx, esi;x_center - x
+	call setPixel, ecx, edx, eax
+	sub edx, edi
+	sub edx, edi;y_center - y
+	call setPixel, ecx, edx, eax
+	add ecx, esi
+	add ecx, esi;x_center + x
+	call setPixel, ecx, edx, eax
+	sub ecx, esi
+	add ecx, edi;x_center + y
+	add edx, edi
+	add edx, esi;y_center + x
+	call setPixel, ecx, edx, eax
+	sub ecx, edi
+	sub ecx, edi;x_center - y
+	call setPixel, ecx, edx, eax
+	sub edx, esi
+	sub edx, esi;y_center - x
+	call setPixel, ecx, edx, eax
+	add ecx, edi
+	add ecx, edi;x_center + y
+	call setPixel, ecx, edx, eax
+	add edx, esi;x_center
+	sub ecx, edi;y_center
+	pop eax;restore p
+	jmp label1
+return:
 	ret
-
 ENDP drawCircle
 
 ;draw AABB struc, given a color
@@ -628,16 +685,15 @@ PROC startGameStatus
 	balk rect <>
 	paal rect <>
 	squareBalkMan manifold <>
-	;mov [rectLst], offset square
-	;call initRectangle, offset square, 0, 10, 10, 20, 2, 1, 10, 1
-	;mov ecx, 1
-	;mov [rectLst + 4*ecx], offset balk
-	;call initRectangle, offset balk, SCRWIDTH - 20, 10, SCRWIDTH, 15, -1, 2, 10, 2
-	;inc ecx
-	;mov [rectLst + 4*ecx], offset paal
-	;call initRectangle, offset paal, SCRWIDTH/2, SCRHEIGHT/2, SCRWIDTH/2 + 5, SCRHEIGHT/2 + 20, 1, 2, 3
-	circ circle <>
-	call initCircle, offset circ, 100, 100, 50, 0,0,0,0 
+	mov [rectLst], offset square
+	call initRectangle, offset square, 0, 10, 10, 20, 2, 1, 10, 1
+	mov ecx, 1
+	mov [rectLst + 4*ecx], offset balk
+	call initRectangle, offset balk, SCRWIDTH - 20, 10, SCRWIDTH, 15, -1, 2, 10, 2
+	inc ecx
+	mov [rectLst + 4*ecx], offset paal
+	call initRectangle, offset paal, SCRWIDTH/2, SCRHEIGHT/2, SCRWIDTH/2 + 5, SCRHEIGHT/2 + 20, 1, 2, 3
+	call initCircle, offset circ, 25, 25, 50, 0,0,0,0 
 	call drawCircle, offset circ, WHITE
 	ret
 ENDP startGameStatus
@@ -765,7 +821,9 @@ ENDP main
 ;--------------------------------------------------------
 
 DATASEG
-
+	
+	vecAB vec <>
+	circ circle <>
 	screenBuffer 	db 64000 dup(0), '$'
 	rectLst 		dd 64 dup(?), '$'
 	rectNum 		dd 0
