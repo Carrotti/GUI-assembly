@@ -37,6 +37,7 @@ STRUC rect
 	box AABB <>
 	velocity vec <>
 	mass dd ?
+	restitution dd ?
 ENDS rect
 
 ;manifold
@@ -57,7 +58,7 @@ ENDS manifold
 ;set begin values for AABB struct in a rectangle
 
 PROC initRectangle
-	ARG 	@@rectPtr:dword, @@xmin:dword, @@ymin:dword, @@xmax:dword, @@ymax:dword, @@velx:dword, @@vely:dword, @@mass:dword
+	ARG 	@@rectPtr:dword, @@xmin:dword, @@ymin:dword, @@xmax:dword, @@ymax:dword, @@velx:dword, @@vely:dword, @@mass:dword, @@restitution:dword
 	USES 	eax, ebx, ecx, edx, edi
 
 	mov eax, [rectNum]
@@ -81,6 +82,9 @@ initVelocity:
 initMass:
 	mov ebx, [@@mass]
 	mov [(rect eax).mass], ebx
+initRestitution:
+	mov ebx, [@@restitution]
+	mov [(rect eax).restitution], ebx
 
 	ret
 ENDP initRectangle
@@ -250,8 +254,107 @@ PROC impulseResolution
 	ARG 	@@rect1Ptr:dword, @@rect2Ptr:dword
 	USES 	eax, ebx, ecx, edx
 
+	mov eax, [@@rect1Ptr]
+	mov ebx, [@@rect2Ptr]
 
+	mf manifold <>
+	rv vec <>
 
+	mov [mf.rect1], [@@rect1Ptr]
+	mov [mf.rect2], [@@rect2Ptr]
+	call AABBvsAABB, mf
+
+	mov ecx, [(rect eax).velocity.x]
+	mov edx, [(rect ebx).velocity.x]
+	sub edx, ecx
+	mov [rv.x], edx
+	mov ecx, [(rect eax).velocity.y]
+	mov edx, [(rect ebx).velocity.y]
+	sub edx, ecx
+	mov [rv.y], edx
+	push ebx
+	push eax
+
+	mov eax, [mf.normal.x]
+	mov ebx, [rv.x]
+	mul ebx
+	mov ecx, eax
+	mov eax, [mf.normal.y]
+	mov ebx, [rv.y]
+	mul ebx
+	add eax, ecx ;eax = velAlongNormal
+
+	cmp eax, 0
+	jg @@return
+	push eax
+
+@@calculateRestitution:
+	mov eax, [mf.rect1.restitution]
+	mov ebx, [mf.rect2.restitution]
+	cmp eax, ebx
+	jg @@useRect1Restitution
+@@useRect2Restitution:
+	mov eax, ebx
+@@useRect1Restitution:
+	pop ebx ;velAlongNormal
+	add eax, 1
+	mul ebx
+	mov ebx, 0
+	sub ebx, eax
+	mov eax, ebx ;impulse calar in eax
+	push eax
+	mov eax, 1
+	mov ebx, [mf.rect1.mass]
+	xor edx, edx
+	div ebx
+	push eax ;1/A.mass
+	mov eax, 1
+	mov ebx, [mf.rect2.mass]
+	xor edx, edx
+	div ebx
+	pop ebx
+	add ebx, eax
+	pop eax ;impulse scalar
+	div ebx
+@@applyImpulse:
+	impulse vec <>
+	mov ebx, eax
+	mul [mf.normal.x]
+	mov [impulse.x], eax
+	mov eax, ebx
+	mul [mf.normal.y]
+	mov [impulse.y], eax
+	mov eax, [@@rect1Ptr]
+	mov ebx, [@@rect2Ptr]
+
+	mov eax, [impulse.x]
+	mov edx, [mf.rect1.mass]
+	mul edx
+	mov [impulse.x], eax
+	mov eax, [impulse.y]
+	mul edx
+	mov [impulse.y], eax
+	mov eax, 1
+	mov ebx, [impulse.x]
+	xor edx, edx
+	div ebx
+	mov [impulse.x], eax
+	mov ebx, [impulse.y]
+	xor edx, edx
+	div edx
+	mov [impulse.y], eax
+	mov eax, [impulse.x]
+	mov ebx, [@@rect1Ptr]
+	mov ecx, [(rect ebx).velocity.x]
+	sub ecx, eax
+	mov [(rect ebx).velocity.x], ecx
+	mov eax, [impulse.y]
+	mov ebx, [@@rect2Ptr]
+	mov ecx, [(rect ebx).velocity.y]
+	add ecx, eax
+	mov [(rect ebx).velocity.y], ecx
+
+@@return:
 	ret
 ENDP impulseResolution
 
@@ -299,9 +402,68 @@ PROC AABBvsAABB
 @@alreadyPositive:
 	sub eax, ebx ;x overlap
 	cmp eax, 0
-	jle @@noOverlap
+	jle @@return
+	push eax
 
-@@noOverlap:
+	mov eax, [(manifold ecx).rect1.box.min.y]
+	mov ebx, [(manifold ecx).rect1.box.max.y]
+	sub ebx, eax
+	mov eax, ebx
+	mov ebx, 2
+	xor edx, edx
+	div ebx
+	push eax ;result of half extent along y axis rect1 in eax
+
+	mov eax, [(manifold ecx).rect2.box.min.y]
+	mov ebx, [(manifold ecx).rect2.box.max.y]
+	sub ebx, eax
+	mov eax, ebx
+	mov ebx, 2
+	xor edx, edx
+	div ebx ;result of half extent along x axis rect2 in eax
+
+	pop ebx 
+	add eax, ebx ;added half extents
+	mov ebx, [vecAB.y]
+	cmp ebx, 0
+	jg @@alreadyPositive1
+	imul ebx, -1
+@@alreadyPositive1:
+	sub eax, ebx ;y overlap
+	cmp eax, 0
+	jle @@return
+
+	pop ebx ;x overlap
+	cmp eax, ebx
+	jg @@alongY
+@@alongX:
+	cmp [vecAB.x], 0
+	jge @@rightSide
+@@leftSide:
+	mov [(manifold ecx).normal.x], -1
+	mov [(manifold ecx).normal.y], 0
+	jmp @@setPenetrationToXOverlap
+@@rightSide:
+	mov [(manifold ecx).normal.x], 1
+	mov [(manifold ecx).normal.y], 0
+@@setPenetrationToXOverlap:
+	mov [(manifold ecx).penetration], ebx
+	jmp @@return
+
+@@alongY:
+	cmp [vecAB.y], 0
+	jge @@bottomSide
+@@topSide:
+	mov [(manifold ecx).normal.x], 0
+	mov [(manifold ecx).normal.y], 1
+	jmp @@setPenetrationToYOverlap
+@@bottomSide:
+	mov [(manifold ecx).normal.x], 0
+	mov [(manifold ecx).normal.y], -1
+@@setPenetrationToYOverlap:
+	mov [(manifold ecx).penetration], eax
+
+@@return:
 	ret
 ENDP AABBvsAABB
 
@@ -396,13 +558,13 @@ PROC startGameStatus
 	paal rect <>
 	squareBalkMan manifold <>
 	mov [rectLst], offset square
-	call initRectangle, offset square, 0, 10, 10, 20, 2, 1, 10
+	call initRectangle, offset square, 0, 10, 10, 20, 2, 1, 10, 1
 	mov ecx, 1
 	mov [rectLst + 4*ecx], offset balk
-	call initRectangle, offset balk, SCRWIDTH - 20, 10, SCRWIDTH, 15, -1, 2, 10
+	call initRectangle, offset balk, SCRWIDTH - 20, 10, SCRWIDTH, 15, -1, 2, 10, 2
 	inc ecx
 	mov [rectLst + 4*ecx], offset paal
-	call initRectangle, offset paal, SCRWIDTH/2, SCRHEIGHT/2, SCRWIDTH/2 + 5, SCRHEIGHT/2 + 20, 1, 2
+	call initRectangle, offset paal, SCRWIDTH/2, SCRHEIGHT/2, SCRWIDTH/2 + 5, SCRHEIGHT/2 + 20, 1, 2, 3
 
 	ret
 ENDP startGameStatus
