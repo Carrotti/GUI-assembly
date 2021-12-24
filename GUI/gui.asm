@@ -67,7 +67,13 @@ PROC initCircle
 	ARG 	@@circPtr:dword, @@x:dword, @@y:dword, @@radius:dword, @@velx:dword, @@vely:dword, @@mass:dword, @@restitution:dword
 	USES	eax, ebx
 
+	;put circle into circLst and increment circNum
+	mov ebx, [circNum]
 	mov eax, [@@circPtr]
+	mov [circLst + 4*ebx], eax
+	inc ebx
+	mov [circNum], ebx
+	;enter values into circle
 	mov ebx, [@@x]
 	mov [(circle eax).position.x], ebx
 	mov ebx, [@@y]
@@ -93,10 +99,12 @@ PROC initRectangle
 	ARG 	@@rectPtr:dword, @@xmin:dword, @@ymin:dword, @@xmax:dword, @@ymax:dword, @@velx:dword, @@vely:dword, @@mass:dword, @@restitution:dword
 	USES 	eax, ebx, ecx, edx, edi
 
-	mov eax, [rectNum]
-	inc eax
-	mov [rectNum], eax
+
+	mov ebx, [rectNum]
 	mov eax, [@@rectPtr]
+	mov [rectLst + 4*ebx], eax
+	inc ebx
+	mov [rectNum], ebx
 initAABB:
 	mov ebx, [@@xmin]
 	mov ecx, [@@ymin]
@@ -219,21 +227,32 @@ PROC moveRectangle
 	ret
 ENDP moveRectangle
 
-;map moveRectangle on rectLst
-
-PROC moveAllRects
-	USES	eax, ecx
-
-	mov ecx, [rectNum]
+;map moveCircle on circLst, then map moveRectangle on rectLst
+PROC moveAllObjects
+	USES 	eax, ecx
+moveCircles:
+	mov ecx, [circNum]
+	cmp ecx, 0
+	jle moveRects
 	mov eax, 0
-keepMoving:
+moveNextCircle:
+	call moveCircle, [circLst + 4*eax]
+	inc eax
+	loop moveNextCircle
+moveRects:
+	mov ecx, [rectNum]
+	cmp ecx, 0
+	jle doneMoving
+	mov eax, 0
+moveNextRect:
 	call moveRectangle, [rectLst + 4*eax]
 	inc eax
-	loop keepMoving
+	loop moveNextRect
 doneMoving:
 	ret
-ENDP moveAllRects
+ENDP moveAllObjects
 
+;given a circle, check if it has hit a border and change direction if necessary
 PROC circHitBorder
 	ARG 	@@circPtr:dword
 	USES	eax, ebx
@@ -347,18 +366,29 @@ noBorder:
 	ret
 ENDP rectHitBorder
 
-;map rectHitBorder on rectLst
-;map circHitBorder on circLst TODO 
+;map circHitBorder on circLst
+;map rectHitBorder on rectLst 
 
 PROC allHitBorder
 	USES	eax, ecx
-
-	mov ecx, [rectNum]
+checkCircles:
+	mov ecx, [circNum]
+	cmp ecx, 0
+	jle checkRects
 	mov eax, 0
-keepChecking:
+checkNextCircle:
+	call circHitBorder, [circLst + 4*eax]
+	inc eax
+	loop checkNextCircle
+checkRects:
+	mov ecx, [rectNum]
+	cmp ecx, 0
+	jle doneChecking
+	mov eax, 0
+checkNextRect:
 	call rectHitBorder, [rectLst + 4*eax]
 	inc eax
-	loop keepChecking
+	loop checkNextRect
 doneChecking:
 	ret
 ENDP allHitBorder
@@ -367,7 +397,7 @@ ENDP allHitBorder
 ;using the separating axis theorem:
 ;if you are able to draw a line to separate two convex polygons, then they do not collide
 
-PROC checkCollision
+PROC checkRectCollision
 	ARG 	@@rect1Ptr:dword, @@rect2Ptr:dword
 	USES eax, ebx, edx, ecx
 
@@ -399,7 +429,7 @@ intersection:
 	mov [(rect ebx).velocity.x], 0
 	mov [(rect ebx).velocity.y], 0
 	ret
-ENDP checkCollision
+ENDP checkRectCollision
 
 ;map checkCollision on rectLst
 
@@ -415,7 +445,7 @@ PROC checkAllCollisions
 	mov ecx, [rectNum]
 	sub ecx, ebx
 @@innerLoop:
-	call checkCollision, [rectLst + 4*eax], [rectLst + 4*ebx]
+	call checkRectCollision, [rectLst + 4*eax], [rectLst + 4*ebx]
 	inc ebx
 	loop @@innerLoop
 	pop ecx
@@ -800,16 +830,14 @@ PROC startGameStatus
 	balk rect <>
 	paal rect <>
 	squareBalkMan manifold <>
-	mov [rectLst], offset square
 	call initRectangle, offset square, 0, 10, 10, 20, 2, 1, 10, 1
-	mov ecx, 1
-	mov [rectLst + 4*ecx], offset balk
 	call initRectangle, offset balk, SCRWIDTH - 20, 10, SCRWIDTH, 15, -1, 2, 10, 2
-	inc ecx
-	mov [rectLst + 4*ecx], offset paal
 	call initRectangle, offset paal, SCRWIDTH/2, SCRHEIGHT/2, SCRWIDTH/2 + 5, SCRHEIGHT/2 + 20, 1, 2, 3
-	call initCircle, offset circ, 50, 50, 20, 1,1,0,0 
-	call drawCircle, offset circ, WHITE
+	
+	circ1 circle 	<>
+	call initCircle, offset circ1, 50, 50, 10, -1,-1,0,0 
+	circ2 circle	<>
+	call initCircle, offset circ2, 100, 100, 20, 1,1,0,0
 	ret
 ENDP startGameStatus
 
@@ -873,12 +901,10 @@ ENDP handleInput
 
 PROC updateGameStatus
 
-	call moveCircle, offset circ
-	call moveAllRects
+	call moveAllObjects
 	call allHitBorder
 	call applyAllGravity
 	inc [timeStamp]
-	call circHitBorder, offset circ
 	call checkAllCollisions
 
 	ret
@@ -943,8 +969,9 @@ DATASEG
 	
 	timeStamp		dd 0
 	vecAB vec 		<>
-	circ circle 	<>
 	screenBuffer 	db 64000 dup(0), '$'
+	circLst			dd 64 dup(?), '$'
+	circNum			dd 0
 	rectLst 		dd 64 dup(?), '$'
 	rectNum 		dd 0
 
